@@ -10,16 +10,30 @@
 #define ZOOM 100
 #define ZERO_POINT_RAD 5
 #define STEP 0.05
-#define POINTS_PER_FRAME 4
+#define POINTS_PER_FRAME 2
 #define UNIT_LENGTH 8
 #define MAX_UNITS 47
 
+float t = 0;
 int zero_count = 0;
+float current_re = 0;
+float current_im = 0;
+float zero_t = 0;
+bool zero_detected = false;
+
+int point_count = (MAX_DISTANCE / STEP) + 1;
+int drawn_points = 0;
+
+bool crosses_center[MAX_POINT_COUNT] = {false};
+bool center_marker_drawn[MAX_POINT_COUNT] = {false};
 
 typedef struct
 {
     float pos_x;
     float pos_y;
+    float re;
+    float im;
+    float t;
 } Point;
 
 Vector2 zeta(float t)
@@ -73,11 +87,6 @@ Vector2 zeta(float t)
     float im_zeta = -(re_eta * im_inv_zeta + im_eta * re_inv_zeta);
 
     return (Vector2){re_zeta, im_zeta};
-}
-
-static bool point_near_center(float x, float y, float cx, float cy, float radius)
-{
-    return hypotf(x - cx, y - cy) <= radius;
 }
 
 void draw_plane()
@@ -250,24 +259,20 @@ void draw_plane()
     }
 }
 
-int main()
+static bool point_near_center(float x, float y, float cx, float cy, float radius)
 {
-    InitWindow(WIDTH, HEIGHT, "Riemann Zeta Function");
-    SetTargetFPS(15);
+    return hypotf(x - cx, y - cy) <= radius;
+}
 
-    int point_count = (MAX_DISTANCE / STEP) + 1;
-    Point points[MAX_POINT_COUNT];
-
-    bool crosses_center[MAX_POINT_COUNT] = {false};
-    bool center_marker_drawn[MAX_POINT_COUNT] = {false};
-
-    float t = 0;
-
-    // Pre-calculate all points
+void calculate_points(Point *points)
+{
     for (int i = 0; i < point_count; i++)
     {
         points[i].pos_x = zeta(t).x * ZOOM + WIDTH / 2;
         points[i].pos_y = zeta(t).y * ZOOM + HEIGHT / 2;
+        points[i].re = zeta(t).x;
+        points[i].im = -zeta(t).y;
+        points[i].t = t;
 
         t += STEP;
     }
@@ -285,8 +290,77 @@ int main()
             zero_count++;
         }
     }
+}
 
-    int drawn_points = 0;
+void draw_points(Point *points)
+{
+    for (int i = 0; i < drawn_points - 1; i++)
+    {
+        float x1 = points[i].pos_x;
+        float y1 = points[i].pos_y;
+        float x2 = points[i + 1].pos_x;
+        float y2 = points[i + 1].pos_y;
+
+        Vector2 start = {x1, y1};
+        Vector2 end = {x2, y2};
+        float thickness = 3;
+
+        DrawLineEx(start, end, thickness, BLUE);
+
+        if (crosses_center[i] && !center_marker_drawn[i])
+        {
+            DrawCircle(WIDTH / 2, HEIGHT / 2, ZERO_POINT_RAD, RED);
+            center_marker_drawn[i] = true;
+
+            zero_t = points[i].t;
+            zero_detected = true;
+        }
+
+        current_re = points[i].re;
+        current_im = points[i].im;
+    }
+}
+
+void draw_graph_info()
+{
+    int point_pos_x = 15;
+    int point_pos_y = 5;
+
+    int zero_pos_x = WIDTH - WIDTH / 4;
+    int zero_pos_y = 5;
+
+    int font_size = 20;
+
+    const char *current_point_text;
+    const char *latest_zero_text;
+
+    if (current_im < 0)
+    {
+        current_point_text = TextFormat("%.2f - %.2fi", current_re, -current_im);
+    }
+    else
+    {
+        current_point_text = TextFormat("%.2f + %.2fi", current_re, current_im);
+    }
+
+    DrawText(current_point_text, point_pos_x, point_pos_y, font_size, WHITE);
+
+    if (zero_detected)
+    {
+        latest_zero_text = TextFormat("zeta(0.5 ± %.2fi) = 0", zero_t);
+
+        DrawText(latest_zero_text, zero_pos_x, zero_pos_y, font_size, WHITE);
+    }
+}
+
+int main()
+{
+    InitWindow(WIDTH, HEIGHT, "Riemann Zeta Function");
+    SetTargetFPS(15);
+
+    Point points[MAX_POINT_COUNT];
+
+    calculate_points(&points[0]);
 
     while (!WindowShouldClose())
     {
@@ -294,27 +368,8 @@ int main()
         ClearBackground(BLACK);
 
         draw_plane();
-
-        // Draw all calculated points
-        for (int i = 0; i < drawn_points - 1; i++)
-        {
-            float x1 = points[i].pos_x;
-            float y1 = points[i].pos_y;
-            float x2 = points[i + 1].pos_x;
-            float y2 = points[i + 1].pos_y;
-
-            Vector2 start = {x1, y1};
-            Vector2 end = {x2, y2};
-            float thickness = 3;
-
-            DrawLineEx(start, end, thickness, BLUE);
-
-            if (crosses_center[i] && !center_marker_drawn[i])
-            {
-                DrawCircle(WIDTH / 2, HEIGHT / 2, ZERO_POINT_RAD, RED);
-                center_marker_drawn[i] = true;
-            }
-        }
+        draw_points(&points[0]);
+        draw_graph_info();
 
         EndDrawing();
 
