@@ -14,19 +14,6 @@
 #define UNIT_LENGTH 8
 #define MAX_UNITS 47
 
-float t = 0;
-int zero_count = 0;
-float current_re = 0;
-float current_im = 0;
-float zero_t = 0;
-bool zero_detected = false;
-
-int point_count = (MAX_DISTANCE / STEP) + 1;
-int drawn_points = 0;
-
-bool crosses_center[MAX_POINT_COUNT] = {false};
-bool center_marker_drawn[MAX_POINT_COUNT] = {false};
-
 typedef struct
 {
     float pos_x;
@@ -35,6 +22,21 @@ typedef struct
     float im;
     float t;
 } Point;
+
+typedef struct
+{
+    Point points[MAX_POINT_COUNT];
+    float current_t;
+    float current_re;
+    float current_im;
+    float zero_t;
+    int zero_count;
+    int point_count;
+    int drawn_points;
+    bool zero_detected;
+    bool crosses_center[MAX_POINT_COUNT];
+    bool center_marker_drawn[MAX_POINT_COUNT];
+} Graph;
 
 Vector2 zeta(float t)
 {
@@ -264,42 +266,40 @@ static bool point_near_center(float x, float y, float cx, float cy, float radius
     return hypotf(x - cx, y - cy) <= radius;
 }
 
-void calculate_points(Point *points)
+void calculate_points(Graph *graph)
 {
-    for (int i = 0; i < point_count; i++)
+    for (int i = 0; i < graph->point_count; i++)
     {
-        points[i].pos_x = zeta(t).x * ZOOM + WIDTH / 2;
-        points[i].pos_y = zeta(t).y * ZOOM + HEIGHT / 2;
-        points[i].re = zeta(t).x;
-        points[i].im = -zeta(t).y;
-        points[i].t = t;
+        // Precalculate screen and complex plane position for each point
+        graph->points[i].pos_x = zeta(graph->current_t).x * ZOOM + WIDTH / 2;
+        graph->points[i].pos_y = zeta(graph->current_t).y * ZOOM + HEIGHT / 2;
+        graph->points[i].re = zeta(graph->current_t).x;
+        graph->points[i].im = -zeta(graph->current_t).y;
+        graph->points[i].t = graph->current_t;
 
-        t += STEP;
-    }
-
-    for (int i = 0; i < point_count; i++)
-    {
         bool near_center = point_near_center(
-            points[i].pos_x, points[i].pos_y,
+            graph->points[i].pos_x, graph->points[i].pos_y,
             WIDTH / 2, HEIGHT / 2,
             ZERO_POINT_RAD);
 
         if (near_center)
         {
-            crosses_center[i] = true;
-            zero_count++;
+            graph->crosses_center[i] = true;
+            graph->zero_count++;
         }
+
+        graph->current_t += STEP;
     }
 }
 
-void draw_points(Point *points)
+void draw_points(Graph *graph)
 {
-    for (int i = 0; i < drawn_points - 1; i++)
+    for (int i = 0; i < graph->drawn_points - 1; i++)
     {
-        float x1 = points[i].pos_x;
-        float y1 = points[i].pos_y;
-        float x2 = points[i + 1].pos_x;
-        float y2 = points[i + 1].pos_y;
+        float x1 = graph->points[i].pos_x;
+        float y1 = graph->points[i].pos_y;
+        float x2 = graph->points[i + 1].pos_x;
+        float y2 = graph->points[i + 1].pos_y;
 
         Vector2 start = {x1, y1};
         Vector2 end = {x2, y2};
@@ -307,21 +307,22 @@ void draw_points(Point *points)
 
         DrawLineEx(start, end, thickness, BLUE);
 
-        if (crosses_center[i] && !center_marker_drawn[i])
+        // Handle non trivial zero detection
+        if (graph->crosses_center[i] && !graph->center_marker_drawn[i])
         {
             DrawCircle(WIDTH / 2, HEIGHT / 2, ZERO_POINT_RAD, RED);
-            center_marker_drawn[i] = true;
+            graph->center_marker_drawn[i] = true;
 
-            zero_t = points[i].t;
-            zero_detected = true;
+            graph->zero_t = graph->points[i].t;
+            graph->zero_detected = true;
         }
 
-        current_re = points[i].re;
-        current_im = points[i].im;
+        graph->current_re = graph->points[i].re;
+        graph->current_im = graph->points[i].im;
     }
 }
 
-void draw_graph_info()
+void draw_graph_info(Graph *graph)
 {
     int point_pos_x = 15;
     int point_pos_y = 5;
@@ -334,20 +335,21 @@ void draw_graph_info()
     const char *current_point_text;
     const char *latest_zero_text;
 
-    if (current_im < 0)
+    // Adjust complex number sign if the graph is below real axis
+    if (graph->current_im < 0)
     {
-        current_point_text = TextFormat("%.2f - %.2fi", current_re, -current_im);
+        current_point_text = TextFormat("%.2f - %.2fi", graph->current_re, -graph->current_im);
     }
     else
     {
-        current_point_text = TextFormat("%.2f + %.2fi", current_re, current_im);
+        current_point_text = TextFormat("%.2f + %.2fi", graph->current_re, graph->current_im);
     }
 
     DrawText(current_point_text, point_pos_x, point_pos_y, font_size, WHITE);
 
-    if (zero_detected)
+    if (graph->zero_detected)
     {
-        latest_zero_text = TextFormat("zeta(0.5 ± %.2fi) = 0", zero_t);
+        latest_zero_text = TextFormat("zeta(0.5 ± %.2fi) = 0", graph->zero_t);
 
         DrawText(latest_zero_text, zero_pos_x, zero_pos_y, font_size, WHITE);
     }
@@ -358,9 +360,26 @@ int main()
     InitWindow(WIDTH, HEIGHT, "Riemann Zeta Function");
     SetTargetFPS(15);
 
-    Point points[MAX_POINT_COUNT];
+    Graph graph;
 
-    calculate_points(&points[0]);
+    graph.current_t = 0;
+    graph.current_re = 0;
+    graph.current_im = 0;
+    graph.zero_t = 0;
+
+    graph.zero_count = 0;
+    graph.point_count = (MAX_DISTANCE / STEP) + 1;
+    graph.drawn_points = 0;
+    graph.zero_detected = false;
+
+    // Initialize non trivial zero detection
+    for (int i = 0; i < MAX_POINT_COUNT; i++)
+    {
+        graph.crosses_center[i] = false;
+        graph.center_marker_drawn[i] = false;
+    }
+
+    calculate_points(&graph);
 
     while (!WindowShouldClose())
     {
@@ -368,15 +387,15 @@ int main()
         ClearBackground(BLACK);
 
         draw_plane();
-        draw_points(&points[0]);
-        draw_graph_info();
+        draw_points(&graph);
+        draw_graph_info(&graph);
 
         EndDrawing();
 
         // Gradually reveal more points
-        if (drawn_points < point_count - 1)
+        if (graph.drawn_points < graph.point_count - 1)
         {
-            drawn_points += POINTS_PER_FRAME;
+            graph.drawn_points += POINTS_PER_FRAME;
         }
     }
 
